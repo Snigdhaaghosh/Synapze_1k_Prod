@@ -1,0 +1,79 @@
+groups:
+  - name: synapze_alerts
+    rules:
+
+      # API down
+      - alert: SynapzeAPIDown
+        expr: up{job="synapze_api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Synapze API is down"
+          description: "The API has been unreachable for more than 1 minute."
+
+      # High error rate
+      - alert: HighErrorRate
+        expr: |
+          rate(synapze_http_requests_total{status=~"5.."}[5m]) /
+          rate(synapze_http_requests_total[5m]) > 0.05
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High HTTP error rate (>5%)"
+          description: "Error rate is {{ humanizePercentage $value }} over the last 5 minutes."
+
+      # Slow responses
+      - alert: SlowResponses
+        expr: |
+          histogram_quantile(0.95,
+            rate(synapze_http_request_duration_ms_bucket[5m])
+          ) > 2000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 response time > 2s"
+          description: "95th percentile response time is {{ $value }}ms."
+
+      # Too many active streams
+      - alert: TooManyActiveStreams
+        expr: synapze_active_streams > 50
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Too many concurrent streaming connections"
+          description: "{{ $value }} active streams — may indicate runaway clients."
+
+      # Database connection pool saturation
+      - alert: DBPoolSaturated
+        expr: synapze_db_pool_size{pool="main"} >= 18
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DB connection pool nearly full"
+          description: "Pool size is {{ $value }}/20 — consider scaling."
+
+      # High token consumption
+      - alert: HighTokenConsumption
+        expr: |
+          rate(synapze_tokens_total[1h]) * 3600 > 1000000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Anthropic token consumption"
+          description: "Projected hourly tokens: {{ humanize $value }}."
+
+      # Circuit breaker open
+      - alert: ToolCircuitOpen
+        expr: synapze_tool_calls_total{status="error"} > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tool failing repeatedly"
+          description: "Tool {{ $labels.tool }} has had {{ $value }} errors."

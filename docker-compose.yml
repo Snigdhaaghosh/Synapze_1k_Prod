@@ -1,0 +1,309 @@
+version: "3.9"
+
+# ── Shared config ──────────────────────────────────────────────────────────────
+x-app-env: &app-env
+  # Point to PgBouncer, not Postgres directly
+  DATABASE_URL: postgresql://synapze:${POSTGRES_PASSWORD}@pgbouncer:5432/synapze
+  DATABASE_URL_READ: postgresql://synapze:${POSTGRES_PASSWORD}@pgbouncer:5432/synapze
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+  CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+  CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/1
+  # Pool tuned for PgBouncer (statement cache must be 0)
+  DB_STATEMENT_CACHE_SIZE: "0"
+  DB_POOL_MIN: "5"
+  DB_POOL_MAX: "25"
+  REDIS_MAX_CONNECTIONS: "200"
+  ANTHROPIC_MAX_CONCURRENT: "50"
+  MAX_CONCURRENT_STREAMS: "200"
+
+x-app-base: &app-base
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  env_file: .env
+  environment:
+    <<: *app-env
+  depends_on:
+    pgbouncer:
+      condition: service_started
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - internal
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "100m"
+      max-file: "5"
+
+services:
+
+  # ── API — 2 replicas, load-balanced by Nginx ─────────────────────────────────
+  api:
+    <<: *app-base
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 2G
+        reservations:
+          cpus: "1.0"
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    environment:
+      <<: *app-env
+      UVICORN_WORKERS: "4"           # 4 workers × 2 replicas = 8 total processes
+      UVICORN_BACKLOG: "2048"
+      UVICORN_LIMIT_MAX_REQUESTS: "10000"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ── Celery Worker — 2 replicas ─────────────────────────────────────────────
+  worker:
+    <<: *app-base
+    command: >
+      celery -A app.tasks.worker.celery_app worker
+      --loglevel=info
+      --concurrency=${CELERY_WORKER_CONCURRENCY:-16}
+      -Q celery,high_priority
+      --prefetch-multiplier=1
+      --max-tasks-per-child=${CELERY_MAX_TASKS_PER_CHILD:-500}
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+
+  # ── Celery Beat (single — redbeat is Redis-backed) ─────────────────────────
+  beat:
+    <<: *app-base
+    command: >
+      celery -A app.tasks.worker.celery_app beat
+      --loglevel=info
+      --scheduler redbeat.RedBeatScheduler
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  # ── Celery Flower ─────────────────────────────────────────────────────────
+  flower:
+    <<: *app-base
+    command: >
+      celery -A app.tasks.worker.celery_app flower
+      --port=5555
+      --basic_auth=${FLOWER_USER}:${FLOWER_PASSWORD}
+    ports:
+      - "127.0.0.1:5555:5555"
+    profiles: [monitoring]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  # ── PgBouncer — connection pooler in front of Postgres ────────────────────
+  # Handles up to 10,000 client connections → 100 server connections
+  pgbouncer:
+    image: bitnami/pgbouncer:1.23.1
+    container_name: synapze_pgbouncer
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      POSTGRESQL_HOST: postgres
+      POSTGRESQL_PORT: 5432
+      POSTGRESQL_DATABASE: synapze
+      POSTGRESQL_USERNAME: synapze
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD}
+      PGBOUNCER_DATABASE: synapze
+      PGBOUNCER_PORT: 5432
+      PGBOUNCER_POOL_MODE: transaction        # required for asyncpg with statement_cache=0
+      PGBOUNCER_MAX_CLIENT_CONN: 10000        # clients (API workers + celery)
+      PGBOUNCER_DEFAULT_POOL_SIZE: 100        # actual Postgres connections
+      PGBOUNCER_MIN_POOL_SIZE: 10
+      PGBOUNCER_RESERVE_POOL_SIZE: 20
+      PGBOUNCER_RESERVE_POOL_TIMEOUT: 3
+      PGBOUNCER_SERVER_IDLE_TIMEOUT: 600
+      PGBOUNCER_CLIENT_IDLE_TIMEOUT: 0
+      PGBOUNCER_IDLE_TRANSACTION_TIMEOUT: 30  # kill zombie transactions
+      PGBOUNCER_AUTH_TYPE: scram-sha-256
+      PGBOUNCER_LOG_CONNECTIONS: 0
+      PGBOUNCER_LOG_DISCONNECTIONS: 0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: synapze_postgres
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      POSTGRES_DB: synapze
+      POSTGRES_USER: synapze
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./docker/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synapze -d synapze"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "127.0.0.1:5433:5432"   # direct access for migrations/backups (not for app)
+
+  # ── Redis (persistent, password-protected) ────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: synapze_redis
+    restart: unless-stopped
+    networks:
+      - internal
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD}
+      --tcp-keepalive 60
+      --timeout 300
+      --tcp-backlog 2048
+      --hz 20
+      --dynamic-hz yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1.2G
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── Frontend (static build) ────────────────────────────────────────────────
+  frontend:
+    image: node:20-alpine
+    container_name: synapze_frontend
+    restart: unless-stopped
+    networks:
+      - internal
+    command: sh -c "npm ci --silent && npm run build && npx serve dist -p 3000 -s --no-clipboard"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    working_dir: /app
+    environment:
+      NODE_ENV: production
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  # ── Nginx — load balancer across API replicas ──────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: synapze_nginx
+    restart: unless-stopped
+    networks:
+      - internal
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - api
+      - frontend
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+    profiles: [production]
+
+  # ── Prometheus ────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: synapze_prometheus
+    restart: unless-stopped
+    networks:
+      - internal
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts:/etc/prometheus/alerts:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    profiles: [monitoring]
+
+  # ── Grafana ───────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: synapze_grafana
+    restart: unless-stopped
+    networks:
+      - internal
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    profiles: [monitoring]
+
+networks:
+  internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_data:
+  redis_data:
+  nginx_logs:
+  prometheus_data:
+  grafana_data:

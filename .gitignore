@@ -1,0 +1,41 @@
+# Env & secrets
+.env
+.env.*
+!.env.example
+docker/ssl/
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+coverage.xml
+*.egg-info/
+dist/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# DB / Redis
+*.db
+dump.rdb
+celerybeat-schedule
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker/postgres/data/

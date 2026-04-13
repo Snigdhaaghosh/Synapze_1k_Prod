@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #0a0a0a;
+  color: #e8e8e8;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
+/* Selection */
+::selection { background: rgba(0, 212, 255, 0.2); color: #fff; }
+
+/* Cursor blink */
+.cursor::after {
+  content: '▋';
+  color: #00d4ff;
+  animation: blink 1.2s step-end infinite;
+  margin-left: 1px;
+  font-size: 0.85em;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* Markdown inside messages */
+.msg-content p   { margin: 0 0 0.5rem; line-height: 1.65; }
+.msg-content p:last-child { margin-bottom: 0; }
+.msg-content code {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82em;
+  color: #00d4ff;
+}
+.msg-content pre {
+  background: #111;
+  border: 1px solid #1e1e1e;
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.msg-content pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #e8e8e8;
+  font-size: 0.85em;
+}
+.msg-content ul, .msg-content ol {
+  padding-left: 1.4rem;
+  margin: 0.4rem 0;
+}
+.msg-content li { margin: 0.2rem 0; line-height: 1.6; }
+.msg-content strong { color: #fff; font-weight: 500; }
+.msg-content a { color: #00d4ff; text-decoration: underline; text-underline-offset: 2px; }
