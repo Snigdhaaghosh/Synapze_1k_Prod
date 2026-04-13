@@ -153,3 +153,6 @@ async def unhandled_error_handler(request: Request, exc: Exception):
         content={"error": "INTERNAL_ERROR",
                  "message": "An internal error occurred. It has been logged."},
     )
+@app.get("/")
+async def root():
+    return {"message": "Synapze API is running 🚀"}
