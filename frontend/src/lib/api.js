@@ -13,7 +13,7 @@ async function refreshAccessToken() {
     const refreshToken = useAuthStore.getState().refreshToken
     if (!refreshToken) throw new Error('No refresh token')
 
-    const res = await fetch('/auth/refresh', {
+    const res = await fetch(`${BASE}/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refreshToken }),
