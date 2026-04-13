@@ -104,12 +104,12 @@ export default function AuthPage() {
               </p>
             </div>
 
-            {/*<button
+            <button
               onClick={openGoogleAuth}
               className="w-full bg-accent/10 hover:bg-accent/20 border border-accent/30 hover:border-accent/60 text-accent font-mono text-xs py-3 rounded-lg transition-all"
             >
               open google auth ↗
-            </button>*/}
+            </button>
 
             <button
               onClick={() => setMode('token')}
