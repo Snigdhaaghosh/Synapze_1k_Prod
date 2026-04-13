@@ -161,6 +161,10 @@ async def _run_migrations() -> None:
             ALTER TABLE users
             ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ;
             CREATE TABLE IF NOT EXISTS user_tokens (
+                           ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS scopes TEXT[];
+ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS access_token TEXT;
+ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS refresh_token TEXT;
                 user_id       TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
                 provider      TEXT NOT NULL,
                 access_token  TEXT,
