@@ -1,5 +1,6 @@
 # Env & secrets
 .env
+frontend/.env
 .env.*
 !.env.example
 docker/ssl/
