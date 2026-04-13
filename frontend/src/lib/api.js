@@ -1,6 +1,6 @@
 import { useAuthStore } from './store'
 
-const BASE = ''
+const BASE = 'https://synapze-1k-prod-1.onrender.com'
 
 // ── Token refresh ──────────────────────────────────────────────────────────
 
@@ -98,7 +98,7 @@ export const api = {
 export async function* streamChat(message, sessionId, { signal } = {}) {
   let token = useAuthStore.getState().accessToken
 
-  const makeRequest = async (t) => fetch('/agent/stream', {
+  const makeRequest = async (t) => fetch(`${BASE}/agent/stream`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
