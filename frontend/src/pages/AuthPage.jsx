@@ -59,7 +59,7 @@ export default function AuthPage() {
   }
 
   function openGoogleAuth() {
-    window.open(`${window.location.origin}/auth/google`, '_blank')
+    window.open('https://synapze-1k-prod-1.onrender.com/auth/google', '_blank')
     setMode('token')
   }
 
